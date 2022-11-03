@@ -3,4 +3,4 @@ This markdown file is meant to be an informative guide on building linear mixed 
 
 I will update this repo as the other parts of the manual are added, and will maintain the Bayesian section bit by bit over time. 
 
-View the [RMarkdown Page](cmoroney.github.io/bayesian-mixed-models/main.html).
+View the [RMarkdown Page](https://cmoroney.github.io/bayesian-mixed-models/main.html).
