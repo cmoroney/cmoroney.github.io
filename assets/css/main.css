@@ -1,4 +1,6 @@
 @import url("fontawesome-all.min.css");
+@import url("all.min.css");
+@import url("brands.min.css");
 @import url("https://fonts.googleapis.com/css?family=Lato:400,400italic,700,700italic|Source+Code+Pro:400");
 
 /*
@@ -1709,7 +1711,7 @@ input, select, textarea {
 	.container {
 		margin: 0 auto;
 		max-width: calc(100% - 4.5em);
-		width: 45em;
+		width: 65em;
 	}
 
 		.container.xsmall {
@@ -1786,12 +1788,12 @@ input, select, textarea {
 
 	header.major h2 {
 		color: #303166;
-		font-size: 3.5em;
+		font-size: 2.5em;
 	}
 
 		header.major h2 + p {
 			color: #777;
-			font-size: 1.75em;
+			font-size: 1.5em;
 			font-weight: 700;
 			margin-top: -0.75em;
 		}
