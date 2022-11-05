@@ -5,3 +5,4 @@ I will update this repo as the other parts of the manual are added, and will mai
 
 View the [RMarkdown Page](https://cmoroney.github.io/bayesian-mixed-models/main.html).
 GitHub Repo: [https://github.com/cmoroney/bayesian-mixed-models](https://github.com/cmoroney/bayesian-mixed-models)
+
