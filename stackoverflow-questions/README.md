@@ -34,7 +34,7 @@ score, offer suggestions to improve the body of their question, suggest better t
 ## Data Prep
 I will be querying the public dataset from a Jupyter notebook and storing the result in a table in my account for future use. 
 
-### Features
+### Question Features
 The `questions` table has a lot of information that you can also see on the post's corresponding webpage. Features created  
 from fields in this table:
 - Creation date - year, day of week, hour 
@@ -64,11 +64,11 @@ I will use questions that no not have any accepted answers as a definition of an
 more accurate response and provides a more balanced dataset to classify - 49% of all questions have no accepted answer 
 vs 14% having no answer at all.
 
-Completed SQL query:
-`
+### Completed SQL query:
+```sql
 WITH stackoverflow_questions AS (
         SELECT *
-        FROM `bigquery-public-data.stackoverflow.posts_questions`
+        FROM bigquery-public-data.stackoverflow.posts_questions
         TABLESAMPLE SYSTEM (20 PERCENT)
     ),
     -- WITH
@@ -91,9 +91,9 @@ WITH stackoverflow_questions AS (
           WHEN tag_based AND class = 3 THEN 'bronze_tag'
           ELSE 'other_badge'
         END AS badge_type
-      FROM `bigquery-public-data.stackoverflow.badges`
+      FROM bigquery-public-data.stackoverflow.badges
       ORDER BY 2
-    ),
+    ),`
 
     calc_features AS (
     SELECT
@@ -202,9 +202,103 @@ WITH stackoverflow_questions AS (
       accepted_answer_boolean
 
     FROM calc_features
-`
+```
 
+## Additional data prep in Python
+Once the data is extracted from BigQuery, we can start to manipulate it in Python to enrich the dataset with more features.
 
+### Compress integer columns 
+Since this query outputs a fairly large dataset (~20 million rows x 37 columns), we will need to make some adjustments along the 
+way to assure that we can work with it in-memory. First we will compress the `int` columns as Google BigQuery assigns `int64`
+by default. Since the numeric data in the dataset are smaller integers, we can take advantage of `int8`, `int16`, and 
+`int32` data types to shrink the size of our training set. 
+
+Function:
+```python
+def compress_int_columns(data):
+    int8_cols = []
+    int16_cols = []
+    for i in df.columns[data.dtypes == 'int64']:
+        if i != "Unnamed: 0":
+            col_max = data[i].max()
+            # col_min = data[i].min()
+
+            if col_max < 32767:
+                if col_max < 127:
+                    int8_cols.append(i)
+                else:
+                    int16_cols.append(i)
+
+    for col in int8_cols:
+        data[col] = data[col].astype(np.int8)
+
+    for col in int16_cols:
+        data[col] = data[col].astype(np.int16)
+
+    return data
+```
+Then we can use this to compress any `int64` columns by writing 
+
+```python
+df = compress_int_columns(df)
+```
+
+## Simple text features
+We can add a few additional text features by writing a few one-line functions:
+
+Count total characters:
+```python
+def count_chars(str):
+    return len(str)
+
+def word_count(str):
+    return len(str.split())
+    
+def count_unique_words(str):
+        return len(set(str.split()))
+```
+
+We can also use more advanced methods from the `textstatistics` and `SpaCy` packages:
+
+```python
+def syllables_count(text):
+        return textstatistics().syllable_count(text)
+
+# Count total number of sentences and difficult words 
+def add_spacy_features(data):
+        sentences_out = []
+        diff_words_out = []
+        for chunk in np.array_split(data, 10):
+            nlp = spacy.load('en_core_web_sm')
+            docs = list(nlp.pipe(chunk,
+                                 # Disable pipeline processes that won't be used
+                                 disable=['toke2vec', 'tagger', 'attribute_ruler', 'lemmatizer', 'ner', 'entity_linker',
+                                          'entity_ruler', 'textcat'],
+                                 n_process=4
+                                 ))
+
+            for doc in docs:
+                words = []
+                sentences = doc.sents
+                for sentence in sentences:
+                    words += [str(token) for token in sentence]
+
+                diff_words_set = set()
+
+                for word in words:
+                    syllable_count = syllables_count(word)
+                    if word not in nlp.Defaults.stop_words and syllable_count >= 2:
+                        diff_words_set.add(word)
+
+                sentences_out.append(len(list(doc.sents)))
+                diff_words_out.append(len(diff_words_set))
+
+        return [sentences_out, diff_words_out]
+```
+
+From the features created using the above functions, we can calculate readability scores: 
+- [Flesch Reading Ease (RE) score](https://readabilityformulas.com/flesch-reading-ease-readability-formula.php) =- 206.835 - (1.015 x `ASL`) - (84.6 x `ASW`) , where `ASL` = average sentence length and `ASW` = average syllables per word
+- [Gunning Fog Readability Index](https://readabilityformulas.com/gunning-fog-readability-formula.php) = 0.4 x (average sentence length + percentage of difficult words) 
 
 View the [FIX THIS LINK](https://google.com)   
 GitHub Repo: [https://github.com/cmoroney/stackoverflow-questions](https://github.com/cmoroney/stackoverflow-questions)
