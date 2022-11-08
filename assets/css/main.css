@@ -2210,7 +2210,7 @@ input, select, textarea {
 				border-radius: 0;
 			}
 
-		.image[alt=data_visualization] {
+		.image[data_visualization] img {
 			width: 80%;
 		}
 
