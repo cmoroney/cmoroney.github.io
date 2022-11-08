@@ -2210,6 +2210,10 @@ input, select, textarea {
 				border-radius: 0;
 			}
 
+		.image[alt=data_visualization] {
+			width: 80%;
+		}
+
 /* List */
 
 	ol {
