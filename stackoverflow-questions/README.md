@@ -10,6 +10,7 @@ This dataset is accessible via Google BigQuery here: https://cloud.google.com/bi
 ## Problem
 Over the years, the userbase has grown quite a bit and as a consequence the number of unanswered questions has grown with it.
 ![some alt text](/images/stackoverflow_user_growth.png)
+<img src="/images/stackoverflow_user_growth.png" alt="some alt" width="70%"/>
 
 The chart below represents the percentage of questions that have not had any posted answers.
 
