@@ -306,6 +306,8 @@ In my original SQL query, I added suffixes to each feature type to make it easie
 Now I can create arrays of column names for each data type, and create a combined array with all columns to use for X:
 
 ```python
+df = df.sample(n=10000, random_state=0)
+
 categorical_features = [col for col in df.columns if '_cat' in col]
 numeric_features = [col for col in df.columns if '_num' in col]
 text_features = ['body_text']
@@ -463,6 +465,100 @@ grid_search = GridSearchCV(text_clf,
                            error_score='raise' # training will stop and raise an error
                            )
 ```
+
+## Model Fit and Performance
+Now that we have a pipeline and search grid defined, we can call `model.fit` with the training data, then assess model 
+performance on the object afterwards.
+
+```python
+grid_search.fit(X, y)
+print(grid_search.cv_results_)
+```
+The `cv_results_` method outputs a clean table of each grid search combination (in this case 4 classifiers) along with 
+mean timings and performance. 
+[INSERCT cv_results_ TABLE HERE]
+
+We can also see the best fitting estimator:
+```python
+print(grid_search.best_estimator_)
+```
+
+[INSERT BEST ESTIMATOR OUTPUT]
+
+XGBoost was our best estimator - no surprise there. 
+
+## Training a Final Model
+Knowing that XGBoost performed the best, I will try improving our prediction accuracy using a larger portion 
+of the dataset and finer tuning of hyperparameters. Much of the pipeline build will be the same as before, only with a different
+search space setup and using `RandomizedSearchCV` instead of grid search.
+
+```python
+from scipy.stats import uniform
+from scipy.stats import randint
+from sklearn.model_selection import RandomizedSearchCV
+
+df = df.sample(n=1000000, random_state=0)
+
+
+# Create preprocessing steps for each feature type
+categorical_preprocessing = Pipeline([
+    ('One Hot Encoding', OneHotEncoder(handle_unknown='ignore'))
+])
+
+numeric_preprocessing = Pipeline([
+    ('scaling', StandardScaler())
+])
+
+text_preprocessing = Pipeline(steps=[
+    ('squeeze', FunctionTransformer(lambda x: x.squeeze())),
+    ('tfidf', TfidfVectorizer(stop_words='english',
+                              lowercase=True,
+                              max_features=1000, # keep feature size down by limiting building a vocabulary of the top X terms by term frequency
+                              dtype=np.float32)), # convert outputs to float32 instead of float64 for memory savings
+    ('toarray', FunctionTransformer(lambda x: x.toarray())),
+])
+
+param_grid = {'classifier__n_estimators': randint(100, 500),
+              'classifier__max_depth': randint(4, 8),
+              'classifier__gamma': uniform(),
+              'classifier__colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
+              'classifier__learning_rate': [0.001, 0.01, 0.1]
+              }
+
+# Combine preprocessing steps to add to pipeline
+preprocessor = ColumnTransformer(transformers=[
+    # TfidfVectorizer expects a string to be passed, so each text column must be passed in a separate step
+    ('text', text_preprocessing, 'body_text'),
+    ('numeric', numeric_preprocessing, numeric_features),
+    ('cat', categorical_preprocessing, categorical_features)
+])
+
+final_text_clf = Pipeline([
+    ('preprocessing', preprocessor),
+    ('selector', SelectFromModel(estimator=LogisticRegression(max_iter=10000))),
+    ('classifier', xgb.XGBClassifier()),
+])
+
+# Set up a Repeated Kfold cross-validation
+cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2)
+
+final_rs = RandomizedSearchCV(final_text_clf,
+                              param_distributions=param_grid,
+                              scoring='f1',
+                              refit=True, # Refit the best hyperparameter set on the full dataset 
+                              cv=cv,
+                              verbose=3,
+                              n_iter=30, # number of random combinations of hyperparameters 
+                              error_score='raise')
+
+print_time("Final model fit begin")
+final_rs.fit(X, y)
+print_time("Final model fit finished")
+```
+
+
+
+## Next Steps 
 
 View the [FIX THIS LINK](https://google.com)   
 GitHub Repo: [https://github.com/cmoroney/stackoverflow-questions](https://github.com/cmoroney/stackoverflow-questions)
