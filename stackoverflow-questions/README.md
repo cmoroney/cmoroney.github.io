@@ -412,7 +412,7 @@ a small subset of the data. The grid search will train each model exhaustively, 
 and hyperparameter subset. After choosing a single algorithm, I will do a more thorough parameter search on a much larger 
 sample for a final model.
 
-![Sklearn Estimator Choices](https://scikit-learn.org/stable/tutorial/machine_learning_map/index.html)
+![Sklearn Estimator Choices](https://scikit-learn.org/stable/_static/ml_map.png)
 
 I will test several estimators for various reasons:
 - Logistic regression as a simpler, more interpretable candidate
