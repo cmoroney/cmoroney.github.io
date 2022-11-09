@@ -246,7 +246,6 @@ df = compress_int_columns(df)
 ## Simple text features
 We can add a few additional text features by writing a few one-line functions:
 
-Count total characters:
 ```python
 def count_chars(str):
     return len(str)
@@ -296,20 +295,174 @@ def add_spacy_features(data):
         return [sentences_out, diff_words_out]
 ```
 SpaCy is an [expansive natural language processing (NLP) package](https://spacy.io/) for Python. I am only scratching the 
-surface of what is capable with SpaCy in this writeup so I suggest checking out the website for more information. 
+surface of what is capable with in this writeup so I suggest checking out the website for more information. 
 
 From the features created using the above functions, we can calculate readability scores: 
 - [Flesch Reading Ease (RE) score](https://readabilityformulas.com/flesch-reading-ease-readability-formula.php) =- 206.835 - (1.015 x `ASL`) - (84.6 x `ASW`) , where `ASL` = average sentence length and `ASW` = average syllables per word
 - [Gunning Fog Readability Index](https://readabilityformulas.com/gunning-fog-readability-formula.php) = 0.4 x (average sentence length + percentage of difficult words) 
 
-That completes our "manual" feature set, in the following sections I will get into additional feature engineering and selection
-using Sklearn and other Python packages.
+## Preprocessing
+In my original SQL query, I added suffixes to each feature type to make it easier to split them up for preprocessing later.
+Now I can create arrays of column names for each data type, and create a combined array with all columns to use for X:
 
-## Vectorization 
+```python
+categorical_features = [col for col in df.columns if '_cat' in col]
+numeric_features = [col for col in df.columns if '_num' in col]
+text_features = ['body_text']
+
+all_features = text_features  + categorical_features + numeric_features
+
+X = df[all_features]
+y =df["accepted_answer_boolean"].astype('int')
+```
+
+For categorical features, I am using a one-hot encoding transformation for simplicity. There are other (potentially better performing) 
+methods for some of these features that are worth testing. For instance, time features like hour of day or day of week can 
+be sine/cosine transformed to retain the cyclical nature.
+
+```python
+categorical_preprocessing = Pipeline([
+    ('One Hot Encoding', OneHotEncoder(handle_unknown='ignore'))
+])
+```
+For numerical features, `StandardScaler()` is used to remove the mean from each observation and scale to unit variance. See 
+[Sklearn preprocessing methods](https://scikit-learn.org/stable/modules/classes.html#module-sklearn.preprocessing) for more info.
+
+```python
+numeric_preprocessing = Pipeline([
+    ('scaling', StandardScaler())
+])
+```
+
+### Text Preprocessing - Vectorization 
 Vectorization is the general term used for converting a collection of text documents into numerical representations (feature
-vectors). 
+vectors). The simplest form of vectorization is the bag of words model. This model assigns an id to each distinct word in a given 
+corpus (tokenization). Then, each document in the dataset is transformed to an array the size of the vocabulary, with a 1 or 
+0 in place for each index representing whether the document contains each distinct word. Count vectorizing uses the count 
+of each word in the document rather than a boolean.
 
-WIP 
+[Term frequency-inverse document frequency (TF-IDF)](https://monkeylearn.com/blog/what-is-tf-idf/) goes 
+a step further. This method has two parts:
+ 
+1. TF (term frequency) = (Frequency of a word in a document / Total number of words in that document) 
+2. IDF (inverse document frequency) = log(Total # of documents / documents containing a given word)
+
+The reason behind using the *inverse* is the idea that the more common a word is across all documents, the less likely
+it is important for the current document. 
+
+Sklearn has a function that combines the `CountVectorizer()` and `TfidfTransformer()` pipeline steps into one called 
+[TfidfVectorizer](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html?highlight=tfidf#sklearn.feature_extraction.text.TfidfVectorizer). 
+
+```python
+('tfidf', TfidfVectorizer(stop_words='english',
+                              lowercase=True,
+                              max_features=1000,
+                              dtype=numpy.float32))
+```
+I am using these parameter values to decrease training time for the purpose of this project. If time isn't a factor or RAM is less of a 
+concern, these parameters should be searched and optimized over for prediction performance.
+- stop_words - This tells the vectorizer which language to use for [stop words](https://kavita-ganesan.com/what-are-stop-words/#.Y2vK0XbMIQ8). You can choose to leave stop words in, I have taken out English stop words as I know from working with this dataset that keeping them in has no benefit on model accuracy.
+- lowercase - Setting `True` will transform all words to lowercase before processing. This could have implications for part-of-speech tagging, so make sure to test both before deciding.
+- max_features - Maximum number of feature columns to include in the model. A corpus could contain tens- or hundreds- of thousands of words. I chose to keep the 1000 top features by term frequency in order to avoid memory constraints later on.  
+- dtype - The feature data output defaults to `float64` which has more decimal places and is therefore more accurate than `float32` but also consumes more memory.
+
+**(See [Sklearn documentation](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html?highlight=tfidf#sklearn.feature_extraction.text.TfidfVectorizer) for full parameter description.)**
+
+After creating preprocessing steps for each feature datatype, we can combine them in one step with `ColumnTransformer` to 
+feed into our pipeline later on. 
+
+Complete preprocessing pipeline:
+```python
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+
+# Create preprocessing steps for each feature type
+categorical_preprocessing = Pipeline([
+    ('One Hot Encoding', OneHotEncoder(handle_unknown='ignore'))
+])
+
+numeric_preprocessing = Pipeline([
+    ('scaling', StandardScaler())
+])
+
+text_preprocessing = Pipeline(steps=[
+    ('squeeze', FunctionTransformer(lambda x: x.squeeze())),
+    ('tfidf', TfidfVectorizer(stop_words='english',
+                              dtype=np.float64)),
+    ('toarray', FunctionTransformer(lambda x: x.toarray())),
+])
+
+# Combine preprocessing steps to add to pipeline
+preprocessor = ColumnTransformer(transformers=[
+    # TfidfVectorizer expects a string to be passed, so each text column must be passed in a separate step
+    ('text', text_preprocessing, 'body_text'),
+    ('numeric', numeric_preprocessing, numeric_features),
+    ('cat', categorical_preprocessing, categorical_features)
+])
+```
+
+In the final pipeline I will add a step for removing columns that consist of a single value, or single-variance 
+features, after the data is preprocessed. 
+
+## Model Selection
+To choose the best algorithm for this classification task I will first use `GridSearchCV()` with several classifiers and 
+a small subset of the data. The grid search will train each model exhaustively, providing accuracy scores for each model 
+and hyperparameter subset. After choosing a single algorithm, I will do a more thorough parameter search on a much larger 
+sample for a final model.
+
+![Sklearn Estimator Choices](https://scikit-learn.org/stable/tutorial/machine_learning_map/index.html)
+
+I will test several estimators for various reasons:
+- Logistic regression as a simpler, more interpretable candidate
+- Support Vector Machines as a memory-efficient and high dimensionality effective candidate
+- XGBoost as a robust ensemble method for most tasks ("swiss army knife" of ML)
+- LightGBM as an alternative/comparison to XGBoost
+
+Using a grid search, we can train all 5 models by creating an array of dictionaries that we will feed to the CV.
+
+```python
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import LinearSVC
+import xgboost as xgb
+import lightgbm as lgb
+from sklearn.feature_selection import VarianceThreshold
+
+search_space = [{'classifier': [LogisticRegression(solver='sag')]},
+                {'classifier': [LinearSVC(max_iter=10000, dual=False)]},
+                {'classifier': [xgb.XGBClassifier()]},
+                {'classifier': [lgb.LGBMClassifier()]},
+                ]
+```
+
+Now within our pipeline, a dummy estimator needs to be defined so that when the program gets to the classifier portion the 
+grid is referenced and each model is trained with preprocessed data. Within the pipeline, each transformer is required to
+have `fit` and `transform` methods, so in this dummy function we will have those method calls pass to the next section of code.
+
+We then will pass the dummy estimator (which is really a search grid of classifiers) to the final step of the Sklearn pipeline.
+
+```python
+from sklearn.base import BaseEstimator
+class DummyEstimator(BaseEstimator):
+    def fit(self): pass
+    def score(self): pass
+
+text_clf = Pipeline([
+    ('preprocessing', preprocessor),
+    ('vt', VarianceThreshold()),
+    ('classifier', DummyEstimator())
+])
+
+grid_search = GridSearchCV(text_clf,
+                           param_grid=search_space,
+                           scoring=['accuracy'],
+                           verbose=3, # highest verbosity - a lot of info is printed during training
+                           cv=cv, 
+                           refit=False, # do not refit on the selected model we will be building a new one 
+                           error_score='raise' # training will stop and raise an error
+                           )
+```
 
 View the [FIX THIS LINK](https://google.com)   
 GitHub Repo: [https://github.com/cmoroney/stackoverflow-questions](https://github.com/cmoroney/stackoverflow-questions)
