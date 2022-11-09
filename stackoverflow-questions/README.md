@@ -93,7 +93,7 @@ WITH stackoverflow_questions AS (
         END AS badge_type
       FROM bigquery-public-data.stackoverflow.badges
       ORDER BY 2
-    ),`
+    ),
 
     calc_features AS (
     SELECT
@@ -295,10 +295,21 @@ def add_spacy_features(data):
 
         return [sentences_out, diff_words_out]
 ```
+SpaCy is an [expansive natural language processing (NLP) package](https://spacy.io/) for Python. I am only scratching the 
+surface of what is capable with SpaCy in this writeup so I suggest checking out the website for more information. 
 
 From the features created using the above functions, we can calculate readability scores: 
 - [Flesch Reading Ease (RE) score](https://readabilityformulas.com/flesch-reading-ease-readability-formula.php) =- 206.835 - (1.015 x `ASL`) - (84.6 x `ASW`) , where `ASL` = average sentence length and `ASW` = average syllables per word
 - [Gunning Fog Readability Index](https://readabilityformulas.com/gunning-fog-readability-formula.php) = 0.4 x (average sentence length + percentage of difficult words) 
+
+That completes our "manual" feature set, in the following sections I will get into additional feature engineering and selection
+using Sklearn and other Python packages.
+
+## Vectorization 
+Vectorization is the general term used for converting a collection of text documents into numerical representations (feature
+vectors). 
+
+WIP 
 
 View the [FIX THIS LINK](https://google.com)   
 GitHub Repo: [https://github.com/cmoroney/stackoverflow-questions](https://github.com/cmoroney/stackoverflow-questions)
