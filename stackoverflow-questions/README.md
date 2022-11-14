@@ -493,12 +493,26 @@ of the dataset and finer tuning of hyperparameters. Much of the pipeline build w
 search space setup and using `RandomizedSearchCV` instead of grid search.
 
 ```python
-from scipy.stats import uniform
-from scipy.stats import randint
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV, KFold
 
+df = pd.read_csv('enhanced_output.csv')
 df = df.sample(n=1000000, random_state=0)
+print("dropping NA's...")
+df.dropna(inplace=True)
 
+categorical_features = [col for col in df.columns if '_cat' in col]
+numeric_features = [col for col in df.columns if '_num' in col]
+text_features = ['body_text']
+
+all_features = text_features  + categorical_features + numeric_features
+
+X = df[all_features]
+y =df["accepted_answer_boolean"].astype('int')
+# x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=0)
+
+# Set up a stratified Kfold cross-validation
+# cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2)
+cv = KFold(n_splits = 5)
 
 # Create preprocessing steps for each feature type
 categorical_preprocessing = Pipeline([
@@ -514,16 +528,19 @@ text_preprocessing = Pipeline(steps=[
     ('tfidf', TfidfVectorizer(stop_words='english',
                               lowercase=True,
                               max_features=1000, # keep feature size down by limiting building a vocabulary of the top X terms by term frequency
-                              dtype=np.float32)), # convert outputs to float32 instead of float64 for memory savings
+                              dtype=np.float64)), # convert outputs to float32 instead of float64 for memory savings
     ('toarray', FunctionTransformer(lambda x: x.toarray())),
 ])
 
-param_grid = {'classifier__n_estimators': randint(100, 500),
-              'classifier__max_depth': randint(4, 8),
-              'classifier__gamma': uniform(),
-              'classifier__colsample_bytree': [0.6, 0.7, 0.8, 0.9, 1.0],
-              'classifier__learning_rate': [0.001, 0.01, 0.1]
+param_grid = {
+              # 'classifier__min_child_weight': [1, 5, 10],
+              'classifier__max_depth': [3, 4, 5],
+              'classifier__gamma': [0.5, 1, 1.5, 2, 5],
+              'classifier__colsample_bytree': [0.6, 0.8, 1.0],
+              'classifier__learning_rate': [0.01, 0.02],
+              'classifier__subsample': [0.6, 0.8, 1.0]
               }
+single_param_grid = {'classifier__n_estimators': [50]}
 
 # Combine preprocessing steps to add to pipeline
 preprocessor = ColumnTransformer(transformers=[
@@ -535,31 +552,63 @@ preprocessor = ColumnTransformer(transformers=[
 
 final_text_clf = Pipeline([
     ('preprocessing', preprocessor),
+    ('vt', VarianceThreshold()),
     ('selector', SelectFromModel(estimator=LogisticRegression(max_iter=10000))),
-    ('classifier', xgb.XGBClassifier()),
+    ('classifier', xgb.XGBClassifier(
+        tree_method='gpu_hist',
+        gpu_id=0
+    )),
 ])
-
-# Set up a Repeated Kfold cross-validation
-cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2)
 
 final_rs = RandomizedSearchCV(final_text_clf,
                               param_distributions=param_grid,
-                              scoring='f1',
-                              refit=True, # Refit the best hyperparameter set on the full dataset 
+                              refit=False,
                               cv=cv,
                               verbose=3,
-                              n_iter=30, # number of random combinations of hyperparameters 
-                              error_score='raise')
+                              n_iter=50,
+                              n_jobs=cv.n_splits,
+                              error_score='raise',
+                              )
 
 print_time("Final model fit begin")
 final_rs.fit(X, y)
 print_time("Final model fit finished")
 ```
+After nearly 12 hours, the fit finished: 
+```
+10:33:08 - Final model fit begin
+Fitting 5 folds for each of 50 candidates, totalling 250 fits
+21:59:55 - Final model fit finished
+```
 
+Now we can pull the best parameters and score using the `final_rs` object:
+```python
+print(final_rs.best_params_)
+print(final_rs.best_score_)
+```
+```
+{'classifier__subsample': 0.6, 'classifier__max_depth': 5, 'classifier__learning_rate': 0.02, 'classifier__gamma': 1.5, 'classifier__colsample_bytree': 0.6}
 
+0.5919286882968179
+```
+
+The score performed better than a 50/50 guess, but not by much at 59.19% accuracy. It is worth noting that a 100x increase 
+in the size of the training data only increased model performance incrementally, which is a good thing to keep in mind when
+retraining models for this task going forward.
 
 ## Next Steps 
+Since the final model did not perform particularly well, I feel I could make some changes to the feature set in order 
+to improve classification. It is also possible that a different classifier would be better for this task. Here are 
+some potential next steps:
+- Use title text and post tags to predict the number of views a post might receive, then use the predication as a feature for classification
+- Implement Word2Vec
+- Try applying neural nets for classification (LSTM) 
 
-View the [FIX THIS LINK](https://google.com)   
+I will update this page with completed next steps as I make progress.
+
+Thank you for reading!
+
+View the [full Jupyter Notebook](https://github.com/cmoroney/stackoverflow-questions/blob/main/main_update.ipynb)   
 GitHub Repo: [https://github.com/cmoroney/stackoverflow-questions](https://github.com/cmoroney/stackoverflow-questions)
+
 
