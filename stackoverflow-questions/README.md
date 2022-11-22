@@ -5,7 +5,10 @@ SO covers the first page of Google results for most if not all common error code
 StackOverflow has published a public dataset containing all forum activity between 2008 and 2022. The largest table, `questions`,
 contains over 24 million rows of post content and metadata. 
 
-This dataset is accessible via Google BigQuery here: https://cloud.google.com/bigquery/public-data  
+This dataset is accessible via Google BigQuery here: https://cloud.google.com/bigquery/public-data
+
+Note: most EDA performed was done inside GCP and not saved. I did not plan on creating a write up for this until far into 
+the project. I will recreate my EDA process when I have time and update this page. 
 
 ## Problem
 Over the years, the userbase has grown quite a bit and as a consequence the number of unanswered questions has grown with it.
@@ -335,83 +338,13 @@ numeric_preprocessing = Pipeline([
     ('scaling', StandardScaler())
 ])
 ```
+## Base Model
+Let's fit a base model using only the numeric and categorical features to get an idea of predictive accuracy before adding more complex NLP 
+features.
 
-### Text Preprocessing - Vectorization 
-Vectorization is the general term used for converting a collection of text documents into numerical representations (feature
-vectors). The simplest form of vectorization is the bag of words model. This model assigns an id to each distinct word in a given 
-corpus (tokenization). Then, each document in the dataset is transformed to an array the size of the vocabulary, with a 1 or 
-0 in place for each index representing whether the document contains each distinct word. Count vectorizing uses the count 
-of each word in the document rather than a boolean.
-
-[Term frequency-inverse document frequency (TF-IDF)](https://monkeylearn.com/blog/what-is-tf-idf/) goes 
-a step further. This method has two parts:
- 
-1. TF (term frequency) = (Frequency of a word in a document / Total number of words in that document) 
-2. IDF (inverse document frequency) = log(Total # of documents / documents containing a given word)
-
-The reason behind using the *inverse* is the idea that the more common a word is across all documents, the less likely
-it is important for the current document. 
-
-Sklearn has a function that combines the `CountVectorizer()` and `TfidfTransformer()` pipeline steps into one called 
-[TfidfVectorizer](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html?highlight=tfidf#sklearn.feature_extraction.text.TfidfVectorizer). 
-
-```python
-('tfidf', TfidfVectorizer(stop_words='english',
-                              lowercase=True,
-                              max_features=1000,
-                              dtype=numpy.float32))
-```
-I am using these parameter values to decrease training time for the purpose of this project. If time isn't a factor or RAM is less of a 
-concern, these parameters should be searched and optimized over for prediction performance.
-- stop_words - This tells the vectorizer which language to use for [stop words](https://kavita-ganesan.com/what-are-stop-words/#.Y2vK0XbMIQ8). You can choose to leave stop words in, I have taken out English stop words as I know from working with this dataset that keeping them in has no benefit on model accuracy.
-- lowercase - Setting `True` will transform all words to lowercase before processing. This could have implications for part-of-speech tagging, so make sure to test both before deciding.
-- max_features - Maximum number of feature columns to include in the model. A corpus could contain tens- or hundreds- of thousands of words. I chose to keep the 1000 top features by term frequency in order to avoid memory constraints later on.  
-- dtype - The feature data output defaults to `float64` which has more decimal places and is therefore more accurate than `float32` but also consumes more memory.
-
-**(See [Sklearn documentation](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html?highlight=tfidf#sklearn.feature_extraction.text.TfidfVectorizer) for full parameter description.)**
-
-After creating preprocessing steps for each feature datatype, we can combine them in one step with `ColumnTransformer` to 
-feed into our pipeline later on. 
-
-Complete preprocessing pipeline:
-```python
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-
-# Create preprocessing steps for each feature type
-categorical_preprocessing = Pipeline([
-    ('One Hot Encoding', OneHotEncoder(handle_unknown='ignore'))
-])
-
-numeric_preprocessing = Pipeline([
-    ('scaling', StandardScaler())
-])
-
-text_preprocessing = Pipeline(steps=[
-    ('squeeze', FunctionTransformer(lambda x: x.squeeze())),
-    ('tfidf', TfidfVectorizer(stop_words='english',
-                              dtype=np.float64)),
-    ('toarray', FunctionTransformer(lambda x: x.toarray())),
-])
-
-# Combine preprocessing steps to add to pipeline
-preprocessor = ColumnTransformer(transformers=[
-    # TfidfVectorizer expects a string to be passed, so each text column must be passed in a separate step
-    ('text', text_preprocessing, 'body_text'),
-    ('numeric', numeric_preprocessing, numeric_features),
-    ('cat', categorical_preprocessing, categorical_features)
-])
-```
-
-In the final pipeline I will add a step for removing columns that consist of a single value, or single-variance 
-features, after the data is preprocessed. 
-
-## Model Selection
-To choose the best algorithm for this classification task I will first use `GridSearchCV()` with several classifiers and 
-a small subset of the data. The grid search will train each model exhaustively, providing accuracy scores for each model 
-and hyperparameter subset. After choosing a single algorithm, I will do a more thorough parameter search on a much larger 
+To choose the best algorithm for this classification task I will use `GridSearchCV()` with several classifiers and 
+a small subset of the data. The grid search will train each model with randomized hyperparameters, providing accuracy scores for each model 
+and hyperparameter subset. After choosing the best performing algorithm, I will do a more thorough parameter search on a much larger 
 sample for a final model.
 
 ![Sklearn Estimator Choices](https://scikit-learn.org/stable/_static/ml_map.png)
@@ -422,7 +355,7 @@ I will test several estimators for various reasons:
 - XGBoost as a robust ensemble method for most tasks ("swiss army knife" of ML)
 - LightGBM as an alternative/comparison to XGBoost
 
-Using a grid search, we can train all 5 models by creating an array of dictionaries that we will feed to the CV.
+Using a grid search, we can train all 4 models by creating an array of dictionaries that we will feed to the CV.
 
 ```python
 from sklearn.linear_model import LogisticRegression
@@ -431,9 +364,9 @@ import xgboost as xgb
 import lightgbm as lgb
 from sklearn.feature_selection import VarianceThreshold
 
-search_space = [{'classifier': [LogisticRegression(solver='sag')]},
+search_space = [{'classifier': [LogisticRegression(solver='sag', max_iter=10000, penalty="l2")]},
                 {'classifier': [LinearSVC(max_iter=10000, dual=False)]},
-                {'classifier': [xgb.XGBClassifier()]},
+                {'classifier': [xgb.XGBClassifier(tree_method='gpu_hist')]},
                 {'classifier': [lgb.LGBMClassifier()]},
                 ]
 ```
@@ -475,22 +408,263 @@ grid_search.fit(X, y)
 print(grid_search.cv_results_)
 ```
 The `cv_results_` method outputs a clean table of each grid search combination (in this case 4 classifiers) along with 
-mean timings and performance. 
-[INSERCT cv_results_ TABLE HERE]
+mean timings and performance. Truncated tables included times and accuracy:
 
-We can also see the best fitting estimator:
+![Output](/images/rand_grid_four_algo.png)
+
+LinearSVC was the fastest classifier for both fit and score timing, and came in second for rank accuracy. LightGBM was the most 
+accurate, with 60.76% mean test accuracy from a 5-fold cross validation. 
+
+Although our best performing classifier shows better prediction accuracy than a coin flip, it is still not a very good estimator.
+Next, we can test some more advanced NLP feature extraction methods to see if our model improves at all. 
+
+### Text Preprocessing - Vectorization 
+Vectorization is the general term used for converting a collection of text documents into numerical representations (feature
+vectors). The simplest form of vectorization is the bag of words model. This model assigns an id to each distinct word in a given 
+corpus (tokenization). Then, each document in the dataset is transformed to an array the size of the vocabulary, with a 1 or 
+0 in place for each index representing whether the document contains each distinct word. Count vectorizing uses the count 
+of each word in the document rather than a boolean.
+
+[Term frequency-inverse document frequency (TF-IDF)](https://monkeylearn.com/blog/what-is-tf-idf/) goes 
+a step further. This method has two parts:
+ 
+1. TF (term frequency) = (Frequency of a word in a document / Total number of words in that document) 
+2. IDF (inverse document frequency) = log(Total # of documents / documents containing a given word)
+
+The reason behind using the *inverse* is the idea that the more common a word is across all documents, the less likely
+it is important for the current document. 
+
+Sklearn has a function that combines the `CountVectorizer()` and `TfidfTransformer()` pipeline steps into one called 
+[TfidfVectorizer](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html?highlight=tfidf#sklearn.feature_extraction.text.TfidfVectorizer). 
+
+Let's transform the body text field using the `TfidfVectorizer()` and see what our top words are. The parameter `min_df` 
+allows you to adjust the number of features that are returned, according to how many documents each token is present in. I
+am setting `min_df` to 0.01 which tells the transformer to return only tokens that occur in at least 1% of all documents.
 ```python
-print(grid_search.best_estimator_)
+tfidf = TfidfVectorizer(stop_words='english', min_df=0.01)
+out = tfidf.fit_transform(df['body_text'])
+out
+```
+```
+<9998x24965 sparse matrix of type '<class 'numpy.float64'>'
+	with 253973 stored elements in Compressed Sparse Row format>
+```
+So the transformer generated a feature list of 24,965 unique words from the corpus (our 'body_text' column).
+
+```python
+feature_array = np.array(tfidf.get_feature_names_out())
+tfidf_sorting = np.argsort(out.toarray()).flatten()[::-1]
+
+n = 3
+top_n = feature_array[tfidf_sorting][:n]
+top_n
+```
+```array(['create', 'image', 'project', 'want', 'custom'], dtype=object)```
+These are the top 5 most common words in our corpus.
+
+This is what it looks like inside of the pipeline:
+```python
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+
+X = df[['body_text']] # Double brackets to keep X as a dataframe instead of a series
+y = df['accepted_answer_boolean'].astype('int')
+
+# Combine preprocessing steps to add to pipeline
+preprocessor = ColumnTransformer(transformers=[
+    # TfidfVectorizer expects a string to be passed, so each text column must be passed in a separate step
+    ('text', text_preprocessing, 'body_text'),
+])
+
+pipe = Pipeline([
+    ('preprocessing', preprocessor),
+    ('vt', VarianceThreshold()),
+    ('classifier', DummyEstimator())
+    ])
+
+cv = KFold(n_splits=5)
+
+grid_search = GridSearchCV(pipe,
+                           param_grid=search_space,
+                           # scoring=['accuracy'],
+                           verbose=3,
+                           cv=cv,
+                           refit='accuracy',
+                           error_score='raise')
+
+print_time('starting...')
+grid_search.fit(X, y)
+print_time('finished')
+```
+I am using these parameter values to decrease training time for the purpose of this project. If time isn't a factor or RAM is less of a 
+concern, these parameters should be searched and optimized over for prediction performance.
+- stop_words - This tells the vectorizer which language to use for [stop words](https://kavita-ganesan.com/what-are-stop-words/#.Y2vK0XbMIQ8). You can choose to leave stop words in, I have taken out English stop words as I know from working with this dataset that keeping them in has no benefit on model accuracy.
+- lowercase - Setting `True` will transform all words to lowercase before processing. This could have implications for part-of-speech tagging, so make sure to test both before deciding.
+- max_features - Maximum number of feature columns to include in the model. A corpus could contain tens- or hundreds- of thousands of words. I chose to keep the 1000 top features by term frequency in order to avoid memory constraints later on.  
+- dtype - The feature data output defaults to `float64` which has more decimal places and is therefore more accurate than `float32` but also consumes more memory.
+
+**(See [Sklearn documentation](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html?highlight=tfidf#sklearn.feature_extraction.text.TfidfVectorizer) for full parameter description.)**
+
+Checking the results: 
+```python
+pd.DataFrame(grid_search.cv_results_)[['param_classifier',
+                                       'mean_fit_time', 
+                                       'mean_score_time', 
+                                       'mean_test_accuracy', 
+                                       'rank_test_accuracy']]
+```
+[CV Results](/images/rand_grid_tfidf.png)
+This time, scores are even lower than the model with only numeric and categorical features. Logistic regression performed the 
+best, although LinearSVC wasn't far behind.
+
+Tfidf doesn't seem to bring much to the table in terms of prediction accuracy in this problem.
+
+## Word2Vec
+While `tfidf` allows us to quickly generate features based on word frequency across documents, it doesn't give us any 
+context around what the words mean within a sentence/document. It also inflates our feature set as similar words are not accounted
+for (for example, "written" and "wrote" are similar but are represented as two unique words).
+
+Word2vec is a method patented by Google in 2013 that aims to create word embeddings from neural networks that 
+allow for a deeper machine-readable representation of text. Word2vec allows for comparisons to be made between vector representations
+of words that actually make sense. One common example of this in use is the [king - man + woman = queen example](https://blog.esciencecenter.nl/king-man-woman-king-9a7fd2935a85).
+Put simply, one can argue that if you replace "man" in the definition of the word "king"
+with "woman", the logical answer is "queen". With word2vec, if you use the vectorized representations of all of these 
+words you can show that the two sides are equal. This allows machine learning algorithms to extract more information
+from text and thus allows for better prediction.
+
+## Doc2Vec
+Doc2vec is a generalization of word2vec which instead of vectorizing each individual word in a document, a vector is generated 
+for the entire document.
+
+This method may not be very applicable to our problem, as the intuition would be that documents containing similar context 
+should have the same outcome. The issue with our problem is that most questions on StackOverflow have very similar context - 
+I am encountering X error, how can I change my code to fix it?
+
+Another issue I could see is that the same exact error message could have different solutions depending on the system or 
+environment set up. We've all been there - you search for an error message you're frustrated with, try 5 different fixes to 
+no avail. Often times more information is needed in order to adequately solve a problem that comes up.
+
+I will go through implementation of Doc2Vec for demonstration purposes.
+
+First, we need to import libraries and set up a transformer function. We will also create a function that converts text to 
+lowercase, then runs it through some built-in filters from the `gensim` package.
+
+```python
+from gensim.models.doc2vec import TaggedDocument, Doc2Vec
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn import utils
+from tqdm import tqdm
+from gensim import utils
+import gensim.parsing.preprocessing as gsp
+from sklearn import utils as skl_utils
+
+filters = [
+           gsp.strip_tags,
+           gsp.strip_punctuation,
+           gsp.strip_multiple_whitespaces,
+           gsp.strip_numeric,
+           gsp.remove_stopwords,
+           gsp.strip_short,
+           gsp.stem_text
+          ]
+
+def clean_text(s):
+    s = s.lower()
+    s = utils.to_unicode(s)
+    for f in filters:
+        s = f(s)
+    return s
+
+class Doc2VecTransformer(BaseEstimator):
+    def __init__(self, vector_size=100, learning_rate=0.02, epochs=20):
+        self.learning_rate = learning_rate
+        self.epochs = epochs
+        self._model = None
+        self.vector_size = vector_size
+        self.workers = 4
+
+    def fit(self, raw_documents, df_y=None):
+        tagged_x = [TaggedDocument(clean_text(row).split(), [index]) for index, row in enumerate(raw_documents)]
+        model = Doc2Vec(documents=tagged_x, vector_size=self.vector_size, workers=self.workers)
+        for epoch in range(self.epochs):
+            model.train(skl_utils.shuffle([x for x in tqdm(tagged_x)]), total_examples=len(tagged_x), epochs=1)
+            model.alpha -= self.learning_rate
+            model.min_alpha = model.alpha
+
+        self._model = model
+        return self
+
+    def transform(self, raw_documents):
+        return np.asmatrix(np.array([self._model.infer_vector(clean_text(row).split()) for index, row in enumerate(raw_documents)]))
 ```
 
-[INSERT BEST ESTIMATOR OUTPUT]
+Here's what a pipeline might look like: 
+```python
+from sklearn.model_selection import RandomizedSearchCV, KFold
 
-XGBoost was our best estimator - no surprise there. 
+df = pd.read_csv('enhanced_output.csv')
+df = df.sample(n=10000, random_state=0)
+print("dropping NA's...")
+df.dropna(inplace=True)
+
+text_preprocessing = Pipeline(steps=[
+    ('doc2vec', Doc2VecTransformer())
+])
+
+cv = KFold(n_splits = 5)
+
+param_grid = {
+              # best params from prior runs
+              'classifier__max_depth': [4, 5, 6],
+              'classifier__gamma': [0.05, 0.25, 0.5],
+              'classifier__colsample_bytree': [0.8, 1.0],
+              'classifier__learning_rate': [0.01, 0.05, 0.1],
+              'classifier__subsample': [0.2, 0.3, 0.4],
+              'preprocessing__text__doc2vec__vector_size':[5, 10, 25],
+              'preprocessing__text__doc2vec__learning_rate':[0.01, 0.05, 0.1],
+              'preprocessing__text__doc2vec__epochs':[10, 50, 100],
+              }
+
+# Combine preprocessing steps to add to pipeline
+preprocessor = ColumnTransformer(transformers=[
+    ('text', text_preprocessing, 'body_text'),
+])
+
+final_text_clf = Pipeline([
+    ('preprocessing', preprocessor),
+    ('vt', VarianceThreshold()),
+    ('classifier', xgb.XGBClassifier(tree_method='gpu_hist',
+                                     gpu_id=0))
+])
+
+d2v_rs = RandomizedSearchCV(final_text_clf,
+                              param_distributions=param_grid,
+                              refit=True,
+                              cv=cv,
+                              verbose=3,
+                              n_iter=50,
+                              n_jobs=cv.n_splits,
+                              error_score='raise',
+                              )
+
+print_time("Final model fit begin")
+d2v_rs.fit(X, y)
+print_time("Final model fit finished")
+```
+
+As suggested, this transformation doesn't extract meaningful features on this dataset. The best training score I reached was 51% - 
+not better than a coin flip. I will exclude these features from the final model build and stick with `tfidf` and our basic
+numeric/categorical features.
 
 ## Training a Final Model
-Knowing that XGBoost performed the best, I will try improving our prediction accuracy using a larger portion 
-of the dataset and finer tuning of hyperparameters. Much of the pipeline build will be the same as before, only with a different
-search space setup and using `RandomizedSearchCV` instead of grid search.
+I will try improving our prediction accuracy using a larger portion of the dataset and finer tuning of hyperparameters. 
+Much of the pipeline build will be the same as before, only with a different search space setup and combining feature sets. 
+I am also using XGBoost on the final model as it proved to be more accurate with larger datasets in my previous runs.
+
+We have been using a 10k sample throughout the project, I will increase the sample size to 1 million and do a thorough 
+hyperparameter search for best results.
 
 ```python
 from sklearn.model_selection import RandomizedSearchCV, KFold
@@ -508,10 +682,8 @@ all_features = text_features  + categorical_features + numeric_features
 
 X = df[all_features]
 y =df["accepted_answer_boolean"].astype('int')
-# x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=0)
 
-# Set up a stratified Kfold cross-validation
-# cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=2)
+# Set up Kfold cross-validation
 cv = KFold(n_splits = 5)
 
 # Create preprocessing steps for each feature type
@@ -528,19 +700,17 @@ text_preprocessing = Pipeline(steps=[
     ('tfidf', TfidfVectorizer(stop_words='english',
                               lowercase=True,
                               max_features=1000, # keep feature size down by limiting building a vocabulary of the top X terms by term frequency
-                              dtype=np.float64)), # convert outputs to float32 instead of float64 for memory savings
+                              dtype=np.float32)), # convert outputs to float32 instead of float64 for memory savings
     ('toarray', FunctionTransformer(lambda x: x.toarray())),
 ])
 
 param_grid = {
-              # 'classifier__min_child_weight': [1, 5, 10],
               'classifier__max_depth': [3, 4, 5],
               'classifier__gamma': [0.5, 1, 1.5, 2, 5],
               'classifier__colsample_bytree': [0.6, 0.8, 1.0],
               'classifier__learning_rate': [0.01, 0.02],
               'classifier__subsample': [0.6, 0.8, 1.0]
               }
-single_param_grid = {'classifier__n_estimators': [50]}
 
 # Combine preprocessing steps to add to pipeline
 preprocessor = ColumnTransformer(transformers=[
@@ -592,19 +762,20 @@ print(final_rs.best_score_)
 0.5919286882968179
 ```
 
-The score performed better than a 50/50 guess, but not by much at 59.19% accuracy. It is worth noting that a 100x increase 
-in the size of the training data only increased model performance incrementally, which is a good thing to keep in mind when
-retraining models for this task going forward.
+The score performed better than a 50/50 guess, but not by much at 59.19% accuracy. This was actually slightly worse than the performance 
+from a smaller sample size and using our simple features only. 
 
-## Next Steps 
-Since the final model did not perform particularly well, I feel I could make some changes to the feature set in order 
-to improve classification. It is also possible that a different classifier would be better for this task. Here are 
-some potential next steps:
-- Use title text and post tags to predict the number of views a post might receive, then use the predication as a feature for classification
-- Implement Word2Vec
-- Try applying neural nets for classification (LSTM) 
+It is worth noting that a 100x increase in the size of the training data didn't improve performance, which is a good thing 
+to keep in mind if retraining models for this task going forward.
 
-I will update this page with completed next steps as I make progress.
+## Conclusion
+We tried building a classifier capable of predicting whether or not a user's question on Stack Overflow would be answered sufficiently 
+or not. Testing has determined that `tfidf` and `doc2vec` are not useful methods for feature extraction in this particular 
+example, as models trained using the resulting features did rather poorly. 
+
+Since the final model did not perform particularly well, it is possible that embeddings are not useful for this 
+problem and that other methods of feature extraction might need to be explored. As it stands, I would consider this 
+project unfeasible if the Stack Overflow team wanted to pursue it as a means of increasing answer rate on questions. 
 
 Thank you for reading!
 
