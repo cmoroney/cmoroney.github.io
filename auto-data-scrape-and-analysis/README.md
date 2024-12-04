@@ -6,9 +6,15 @@ While I wasn't able to find a public API for this data, I did find a website tha
 public for free. I scraped this website using BeautifulSoup4, the resulting dataset containing 60+ data points for 42,000
 models from 66 makes.
 
-First I'll explain the dataset a bit and perform some exploratory data analysis and then I will fit a model explaaining 0-60mph
-times as a function of horsepower-to-weight ratio.
+Once the data was pulled, I cleansed it and modeled 0-60mph times using weight to horsepower ratio:
 
-View the [FIX THIS LINK](https://cmoroney.github.io/bayesian-mixed-models/main.html)   
+![Image of relationship between 0-60mph and horsepower to weight ratio](https://github.com/cmoroney/auto_data_web_scrape/python/output.png)
+
+Will update this page later with a more in-depth explanation.
+
 GitHub Repo: [https://github.com/cmoroney/auto_data_web_scrape](https://github.com/cmoroney/auto_data_web_scrape)
+
+
+
+
 
