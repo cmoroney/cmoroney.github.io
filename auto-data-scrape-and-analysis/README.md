@@ -8,7 +8,7 @@ models from 66 makes.
 
 Once the data was pulled, I cleansed it and modeled 0-60mph times using weight to horsepower ratio:
 
-![Image of relationship between 0-60mph and horsepower to weight ratio](https://github.com/cmoroney/auto_data_web_scrape/python/output.png)
+![Image of relationship between 0-60mph and horsepower to weight ratio](/images/auto_model.png)
 
 Will update this page later with a more in-depth explanation.
 
