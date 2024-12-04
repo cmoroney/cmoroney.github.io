@@ -6,3 +6,5 @@ I will update this repo as the other parts of the manual are added, and will mai
 View the [RMarkdown Page](https://cmoroney.github.io/bayesian-mixed-models/main.html)   
 GitHub Repo: [https://github.com/cmoroney/bayesian-mixed-models](https://github.com/cmoroney/bayesian-mixed-models)
 
+Professor Samiran Sinha: [https://samiransinha.github.io/](https://samiransinha.github.io/)
+Publication on Professor Sinha's website: [https://samiransinha.github.io/files/teaching/685part1.html#Introduction](https://samiransinha.github.io/files/teaching/685part1.html#Introduction)
